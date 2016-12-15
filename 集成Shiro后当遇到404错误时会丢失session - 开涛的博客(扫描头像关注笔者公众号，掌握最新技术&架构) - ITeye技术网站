@@ -1,0 +1,30 @@
+场景：
+1、首先登录成功后访问正常页面没有问题的；
+2、接着访问一个不存在的页面，即跳到相应的404页面，假设我的页面是jsp的；
+3、再刷新一下就会又跳到登录页面。
+场景分析：
+1、首先登录成功，假设JSESSIONID=e688f231-c0f0-4757-b85b-9ff1e62221b3；
+2、接着访问一个不存在的页面，提交的JSESSIONID=e688f231-c0f0-4757-b85b-9ff1e62221b3；即提交的JSESSIONID和登录成功的一样；没什么问题；
+3、接着随便访问一个地址，会得到JSESSIONID=19eqzaptfpxad17y06dz3uc6xz；两次JSESSIONID不一样且格式不类似，【1、2】步骤的明显是Java UUID生成的key；而第二个则像是如Jetty容器生成的；
+4、为什么呢？
+技术分析：
+1、首先如果登录成功，Shiro的DefaultWebSessionManager会默认通过如下方式添加JSESSIONID Cookie到响应：
+Java代码 收藏代码
+privatevoid storeSessionId(Serializable currentId, HttpServletRequest request, HttpServletResponse response) {
+if (currentId == null) {
+String msg = "sessionId cannot be null when persisting for subsequent requests.";
+thrownew IllegalArgumentException(msg);
+}
+Cookie template = getSessionIdCookie(); //此处得到JSESSIONID的一个cookie模板
+Cookie cookie = new SimpleCookie(template);
+String idString = currentId.toString();
+cookie.setValue(idString);
+cookie.saveTo(request, response);
+log.trace("Set session ID cookie for session with id {}", idString);
+}
+2、如果客户端访问时会带着个Cookie回来；但是注意：容器不认识的（Web容器并没有真正创建HttpSession）；Shiro默认情况下会生成自己的一套Session，默认是MemorySessionDAO；即放到内存中的；和Web容器没有任何关系；
+3、 接着访问一个错误的页面(如jsp)；此时到了Shiro过滤器，过滤器通过；然后最后forward到这个错误页面；大家应该知道默认情况下jsp页面是需要session的；所以此时jsp会调用request.getSession() 此时创建了一个Session；这会往Cookie写JSESSIONID的；
+如何解决呢？
+1、换一个新的session key，如uid； 推荐这种做法；
+2、错误页面 设置<%@ page session="false' %>；
+3、给shiro filter配置ERROR，然后在其filterChainDefinitions中添加/WEB-INF/jsp/error/error = anon；
